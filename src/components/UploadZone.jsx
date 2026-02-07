@@ -3,7 +3,11 @@ import { useDropzone } from 'react-dropzone';
 
 const UploadZone = ({ onUpload }) => {
     const onDrop = useCallback(acceptedFiles => {
-        onUpload(acceptedFiles);
+        // Sort files by name to maintain proper order (1, 2, 3... instead of 6, 5, 4...)
+        const sortedFiles = [...acceptedFiles].sort((a, b) =>
+            a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+        );
+        onUpload(sortedFiles);
     }, [onUpload]);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({

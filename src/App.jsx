@@ -11,11 +11,13 @@ function App() {
   const [mode, setMode] = useState("contain");
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentPage, setCurrentPage] = useState('landing'); // 'landing', 'app'
+  const [focusedIndex, setFocusedIndex] = useState(null);
 
   // Export Settings
   const [showExportPanel, setShowExportPanel] = useState(false);
   const [exportResolution, setExportResolution] = useState("HD");
   const [exportCompression, setExportCompression] = useState("high");
+  const [enhanceEnabled, setEnhanceEnabled] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
 
   // Live Preview States
@@ -29,6 +31,27 @@ function App() {
   const [sliderPosition, setSliderPosition] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Preview Index (which image to preview in Export Studio)
+  const [previewIndex, setPreviewIndex] = useState(0);
+  // Pan & Crop State
+  const [offsets, setOffsets] = useState({}); // Map index -> {x, y}
+  const [draggedIndex, setDraggedIndex] = useState(null);
+
+  // Focus Mode State
+  const [showOriginalInFocus, setShowOriginalInFocus] = useState(false);
+
+  // Lock body scroll when Export Studio is open
+  useEffect(() => {
+    if (showExportPanel) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [showExportPanel]);
+
   // Re-process when options or originals change
   useEffect(() => {
     if (originals.length === 0) {
@@ -39,14 +62,14 @@ function App() {
     const runProcessing = async () => {
       setIsProcessing(true);
       const results = await Promise.all(
-        originals.map(file => processImage(file, ratio, mode))
+        originals.map((file, idx) => processImage(file, ratio, mode, 20, offsets[idx] || { x: 0, y: 0 }))
       );
       setProcessed(results);
       setIsProcessing(false);
     };
 
     runProcessing();
-  }, [originals, ratio, mode]);
+  }, [originals, ratio, mode, offsets]);
 
   // Generate LIVE preview when export settings change
   useEffect(() => {
@@ -55,7 +78,11 @@ function App() {
     const generatePreviews = async () => {
       setPreviewLoading(true);
       try {
-        const originalResult = await exportWithSettings(processed[0], exportResolution, 'max');
+        // Use selected preview index
+        const targetImage = processed[previewIndex] || processed[0];
+        if (!targetImage) return;
+
+        const originalResult = await exportWithSettings(targetImage, exportResolution, 'max', false);
         setOriginalPreview({
           url: URL.createObjectURL(originalResult.blob),
           sizeKB: originalResult.sizeKB,
@@ -65,7 +92,7 @@ function App() {
         });
         setOriginalSize(originalResult.sizeKB * processed.length);
 
-        const compressedResult = await exportWithSettings(processed[0], exportResolution, exportCompression);
+        const compressedResult = await exportWithSettings(targetImage, exportResolution, exportCompression, enhanceEnabled);
         setCompressedPreview({
           url: URL.createObjectURL(compressedResult.blob),
           sizeKB: compressedResult.sizeKB,
@@ -87,7 +114,7 @@ function App() {
       if (originalPreview?.url) URL.revokeObjectURL(originalPreview.url);
       if (compressedPreview?.url) URL.revokeObjectURL(compressedPreview.url);
     };
-  }, [showExportPanel, exportResolution, exportCompression, processed]);
+  }, [showExportPanel, exportResolution, exportCompression, processed, enhanceEnabled, previewIndex]);
 
   // Slider drag handlers
   const handleSliderMouseDown = () => setIsDragging(true);
@@ -139,7 +166,7 @@ function App() {
     setIsExporting(true);
 
     try {
-      const exportedImages = await batchExport(processed, exportResolution, exportCompression);
+      const exportedImages = await batchExport(processed, exportResolution, exportCompression, enhanceEnabled);
       const zip = new JSZip();
 
       exportedImages.forEach((img) => {
@@ -362,162 +389,216 @@ function App() {
         </div>
       </header>
 
-      {/* EXPORT MODAL */}
+      {/* EXPORT STUDIO OVERLAY */}
       {showExportPanel && (
-        <div className="modal-overlay">
-          <div className="modal animate-fade-in">
-            <div className="modal__header">
-              <h2 className="modal__title">Export Settings</h2>
-              <button className="modal__close" onClick={() => setShowExportPanel(false)}>×</button>
+        <div className="export-studio animate-fade-in">
+          {/* SIDEBAR CONTROLS */}
+          <div className="studio-sidebar">
+            <div className="studio-header">
+              <span className="studio-title">Export Studio</span>
+              <button className="studio-close" onClick={() => setShowExportPanel(false)}>×</button>
             </div>
-            <div className="modal__content">
-              <div className="export-grid">
-                {/* Left: Options */}
-                <div className="export-options">
-                  <div className="export-option-group">
-                    <span className="export-option-label">Resolution</span>
-                    {Object.keys(EXPORT_RESOLUTIONS).map(key => (
-                      <button
-                        key={key}
-                        onClick={() => setExportResolution(key)}
-                        className={`export-option-btn ${exportResolution === key ? 'active' : ''}`}
-                      >
-                        {key}
-                        <span>{EXPORT_RESOLUTIONS[key].description}</span>
-                      </button>
-                    ))}
-                  </div>
 
-                  <div className="export-option-group">
-                    <span className="export-option-label">Quality</span>
-                    {Object.keys(COMPRESSION_PRESETS).map(key => (
-                      <button
-                        key={key}
-                        onClick={() => setExportCompression(key)}
-                        className={`export-option-btn ${exportCompression === key ? 'active' : ''}`}
-                      >
-                        {COMPRESSION_PRESETS[key].label}
-                        <span>{Math.round(COMPRESSION_PRESETS[key].quality * 100)}%</span>
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Size Comparison */}
-                  <div className="size-comparison">
-                    <div className="size-comparison__label">Size Estimate</div>
-                    {compressedPreview && !previewLoading ? (
-                      <>
-                        <div className="size-comparison__row">
-                          <span>Original:</span>
-                          <span className="size-comparison__value--original">{formatSize(originalSize)}</span>
-                        </div>
-                        <div className="size-comparison__row">
-                          <span>Compressed:</span>
-                          <span className="size-comparison__value--compressed">{formatSize(estimatedTotalSize)}</span>
-                        </div>
-                        {calculateSavings() > 0 && (
-                          <div className="size-comparison__savings">
-                            ↓ {calculateSavings()}% smaller
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <p className="text-muted" style={{ fontSize: '0.85rem' }}>Calculating...</p>
-                    )}
-                  </div>
-
+            {/* Resolution Control */}
+            <div className="control-group">
+              <span className="control-label">Output Resolution</span>
+              <div className="segment-control">
+                {Object.keys(EXPORT_RESOLUTIONS).map(key => (
                   <button
-                    onClick={handleAdvancedExport}
-                    disabled={isExporting}
-                    className="btn btn-primary"
-                    style={{ width: '100%', marginTop: 'var(--space-md)' }}
+                    key={key}
+                    onClick={() => setExportResolution(key)}
+                    className={`segment-btn ${exportResolution === key ? 'active' : ''}`}
                   >
-                    {isExporting ? 'Exporting...' : `Export ${processed.length} Images`}
+                    {key}
                   </button>
-                </div>
-
-                {/* Right: Preview */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-sm)' }}>
-                    <span className="text-mono text-muted" style={{ fontSize: '0.75rem' }}>BEFORE / AFTER COMPARISON</span>
-                  </div>
-                  <div
-                    className="preview-container"
-                    style={{
-                      aspectRatio: ASPECT_RATIOS[ratio].width / ASPECT_RATIOS[ratio].height,
-                      cursor: 'ew-resize',
-                      userSelect: 'none'
-                    }}
-                    onMouseDown={handleSliderMouseDown}
-                    onMouseMove={handleSliderMouseMove}
-                    onMouseUp={handleSliderMouseUp}
-                    onMouseLeave={handleSliderMouseUp}
-                    onTouchMove={handleSliderTouchMove}
-                  >
-                    {previewLoading ? (
-                      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <p className="text-muted">Generating preview...</p>
-                      </div>
-                    ) : (
-                      <>
-                        {compressedPreview && (
-                          <img
-                            src={compressedPreview.url}
-                            alt="After"
-                            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
-                            draggable={false}
-                          />
-                        )}
-                        {originalPreview && (
-                          <div style={{ position: 'absolute', top: 0, left: 0, width: `${sliderPosition}%`, height: '100%', overflow: 'hidden' }}>
-                            <img
-                              src={originalPreview.url}
-                              alt="Before"
-                              style={{ position: 'absolute', top: 0, left: 0, width: `${100 / (sliderPosition / 100)}%`, height: '100%', objectFit: 'contain' }}
-                              draggable={false}
-                            />
-                          </div>
-                        )}
-                        {/* Slider */}
-                        <div style={{
-                          position: 'absolute',
-                          top: 0,
-                          left: `${sliderPosition}%`,
-                          width: '2px',
-                          height: '100%',
-                          background: 'var(--deep-black)',
-                          transform: 'translateX(-50%)',
-                          zIndex: 10
-                        }}>
-                          <div style={{
-                            position: 'absolute',
-                            top: '50%',
-                            left: '50%',
-                            transform: 'translate(-50%, -50%)',
-                            width: '32px',
-                            height: '32px',
-                            borderRadius: '50%',
-                            background: 'var(--deep-black)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: 'var(--pure-white)',
-                            fontSize: '12px',
-                            fontWeight: 600
-                          }}>◀▶</div>
-                        </div>
-                        <span className="preview-label preview-label--before">BEFORE</span>
-                        <span className="preview-label preview-label--after">AFTER</span>
-                      </>
-                    )}
-                  </div>
-                  {compressedPreview && !previewLoading && (
-                    <p className="text-mono text-muted text-center mt-md" style={{ fontSize: '0.8rem' }}>
-                      {compressedPreview.width} × {compressedPreview.height} • {processed.length} images
-                    </p>
-                  )}
-                </div>
+                ))}
               </div>
+              <p style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: '#666' }}>
+                {EXPORT_RESOLUTIONS[exportResolution].description}
+              </p>
+            </div>
+
+            {/* Quality Control */}
+            <div className="control-group">
+              <span className="control-label">Compression Mode</span>
+              <div className="segment-control">
+                {Object.keys(COMPRESSION_PRESETS).map(key => (
+                  <button
+                    key={key}
+                    onClick={() => setExportCompression(key)}
+                    className={`segment-btn ${exportCompression === key ? 'active' : ''}`}
+                  >
+                    {COMPRESSION_PRESETS[key].label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Enhancement Control */}
+            <div className="control-group">
+              <span className="control-label">Image Processing</span>
+              <div className="segment-control">
+                <button
+                  onClick={() => setEnhanceEnabled(false)}
+                  className={`segment-btn ${!enhanceEnabled ? 'active' : ''}`}
+                >
+                  Standard
+                </button>
+                <button
+                  onClick={() => setEnhanceEnabled(true)}
+                  className={`segment-btn ${enhanceEnabled ? 'active' : ''}`}
+                >
+                  Smart Enhance
+                </button>
+              </div>
+              <p style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: '#666' }}>
+                {enhanceEnabled ? "Applying adaptive contrast & detail sharpening." : "Original quality preservation."}
+              </p>
+            </div>
+
+            {/* Stats & Action */}
+            <div className="studio-footer">
+              <div className="studio-stat-row">
+                <span>Total Size (Est.)</span>
+                <span className="studio-stat-val">
+                  {previewLoading ? '...' : formatSize(estimatedTotalSize)}
+                </span>
+              </div>
+              <div className="studio-stat-row">
+                <span>Resolution</span>
+                <span className="studio-stat-val">
+                  {compressedPreview?.width} × {compressedPreview?.height}
+                </span>
+              </div>
+              <div className="studio-stat-row">
+                <span>Quality Efficiency</span>
+                <span className="studio-stat-val" style={{ color: calculateSavings() > 20 ? '#4ade80' : '#fff' }}>
+                  {calculateSavings()}% Saved
+                </span>
+              </div>
+
+              <button
+                onClick={handleAdvancedExport}
+                disabled={isExporting || previewLoading}
+                className="btn-export-studio"
+              >
+                {isExporting ? 'Render & Zipping...' : `Export ${processed.length} Images`}
+              </button>
+            </div>
+          </div>
+
+          {/* MAIN PREVIEW CANVAS */}
+          <div className="studio-canvas">
+            <div className="canvas-grid"></div>
+
+            {/* Main Preview Area */}
+            <div className="studio-main-preview">
+              <div
+                className="studio-preview-wrapper"
+                style={{
+                  height: '100%',
+                  maxHeight: 'calc(100vh - 200px)',
+                  aspectRatio: ASPECT_RATIOS[ratio].width / ASPECT_RATIOS[ratio].height,
+                  cursor: 'ew-resize',
+                  userSelect: 'none',
+                  position: 'relative'
+                }}
+                onMouseDown={handleSliderMouseDown}
+                onMouseMove={handleSliderMouseMove}
+                onMouseUp={handleSliderMouseUp}
+                onMouseLeave={handleSliderMouseUp}
+                onTouchMove={handleSliderTouchMove}
+              >
+                {previewLoading ? (
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555', background: '#111', borderRadius: '8px' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>⚡</div>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>Rendering Preview...</div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* After Image (Background - Enhanced/Compressed) */}
+                    {compressedPreview && (
+                      <img
+                        src={compressedPreview.url}
+                        alt="After"
+                        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
+                        draggable={false}
+                      />
+                    )}
+
+                    {/* Before Image (Cropped by Slider - Original) */}
+                    {originalPreview && (
+                      <div style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: `${sliderPosition}%`,
+                        height: '100%',
+                        overflow: 'hidden',
+                        borderRight: '2px solid rgba(255,255,255,0.8)'
+                      }}>
+                        <img
+                          src={originalPreview.url}
+                          alt="Before"
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: `${100 / (sliderPosition / 100)}%`,
+                            height: '100%',
+                            objectFit: 'contain',
+                            maxWidth: 'none'
+                          }}
+                          draggable={false}
+                        />
+                      </div>
+                    )}
+
+                    {/* Slider Handle */}
+                    <div style={{
+                      position: 'absolute',
+                      top: '50%',
+                      left: `${sliderPosition}%`,
+                      transform: 'translate(-50%, -50%)',
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      background: '#fff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+                      color: '#000',
+                      fontSize: '11px',
+                      zIndex: 10,
+                      cursor: 'ew-resize'
+                    }}>
+                      ◀▶
+                    </div>
+
+                    {/* Labels */}
+                    <div style={{ position: 'absolute', top: 12, left: 12, background: 'rgba(0,0,0,0.7)', padding: '4px 10px', borderRadius: 4, fontSize: '0.65rem', color: '#999', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Original</div>
+                    <div style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(0,0,0,0.7)', padding: '4px 10px', borderRadius: 4, fontSize: '0.65rem', color: enhanceEnabled ? '#4ade80' : '#999', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{enhanceEnabled ? '✨ Enhanced' : 'Compressed'}</div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Thumbnail Strip */}
+            <div className="thumbnail-strip">
+              {processed.map((img, idx) => (
+                <div
+                  key={idx}
+                  className={`thumbnail-item ${previewIndex === idx ? 'active' : ''}`}
+                  onClick={() => setPreviewIndex(idx)}
+                  style={{ position: 'relative' }}
+                >
+                  <img src={img.preview} alt={`Preview ${idx + 1}`} />
+                  <span className="thumbnail-index">{String(idx + 1).padStart(2, '0')}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -577,33 +658,80 @@ function App() {
               ) : processed.map((img, idx) => (
                 <div
                   key={idx}
-                  className="animate-fade-in"
-                  style={{ animationDelay: `${idx * 0.05}s`, opacity: 0 }}
+                  draggable
+                  onDragStart={(e) => {
+                    setDraggedIndex(idx);
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (draggedIndex === null || draggedIndex === idx) return;
+
+                    // Reorder files AND offsets
+                    const items = originals.map((file, i) => ({ file, offset: offsets[i] }));
+                    const [moved] = items.splice(draggedIndex, 1);
+                    items.splice(idx, 0, moved);
+
+                    setOriginals(items.map(x => x.file));
+                    const nextOffsets = {};
+                    items.forEach((x, i) => { if (x.offset) nextOffsets[i] = x.offset; });
+                    setOffsets(nextOffsets);
+                    setDraggedIndex(null);
+                  }}
+                  className="animate-fade-in group"
+                  style={{ animationDelay: `${idx * 0.05}s`, opacity: 0, position: 'relative', cursor: 'grab' }}
                 >
                   <div
                     className="image-card"
-                    style={{ aspectRatio: ASPECT_RATIOS[ratio].width / ASPECT_RATIOS[ratio].height }}
+                    style={{ aspectRatio: ASPECT_RATIOS[ratio].width / ASPECT_RATIOS[ratio].height, overflow: 'hidden' }}
                   >
-                    <img src={img.preview} alt={`Preview ${idx + 1}`} />
-                    <a
-                      href={img.preview}
-                      download={`${String(idx + 1).padStart(2, '0')}_${img.name}`}
-                      style={{
-                        position: 'absolute',
-                        bottom: 'var(--space-sm)',
-                        right: 'var(--space-sm)',
-                        background: 'var(--deep-black)',
-                        color: 'var(--pure-white)',
-                        padding: 'var(--space-xs) var(--space-sm)',
-                        borderRadius: 'var(--radius-sm)',
-                        fontSize: '0.75rem',
-                        fontFamily: 'var(--font-mono)',
-                        textDecoration: 'none',
-                        opacity: 0.9
-                      }}
+                    <img src={img.preview} alt={`Preview ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+
+                    {/* Hover Controls Overlay */}
+                    <div className="image-card__overlay" style={{
+                      position: 'absolute',
+                      inset: 0,
+                      background: 'rgba(0,0,0,0.4)',
+                      opacity: 0,
+                      transition: 'opacity 0.2s',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '10px'
+                    }}
+                      onMouseEnter={(e) => e.currentTarget.style.opacity = 1}
+                      onMouseLeave={(e) => e.currentTarget.style.opacity = 0}
                     >
-                      ↓
-                    </a>
+                      <button
+                        onClick={() => setFocusedIndex(idx)}
+                        className="btn-icon"
+                        title="Focus / Edit"
+                        style={{ background: 'white', color: 'black', borderRadius: '50%', width: 40, height: 40, border: 'none', cursor: 'pointer' }}
+                      >
+                        ⤢
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const newOriginals = originals.filter((_, i) => i !== idx);
+                          setOriginals(newOriginals);
+                          // Also remove offset
+                          const newOffsets = { ...offsets };
+                          delete newOffsets[idx];
+                          setOffsets(newOffsets);
+                        }}
+                        className="btn-icon"
+                        title="Remove"
+                        style={{ background: '#ff4d4d', color: 'white', borderRadius: '50%', width: 40, height: 40, border: 'none', cursor: 'pointer' }}
+                      >
+                        ×
+                      </button>
+                    </div>
+
                     <span style={{
                       position: 'absolute',
                       top: 'var(--space-sm)',
@@ -614,7 +742,8 @@ function App() {
                       borderRadius: 'var(--radius-sm)',
                       fontSize: '0.7rem',
                       fontFamily: 'var(--font-mono)',
-                      fontWeight: 600
+                      fontWeight: 600,
+                      zIndex: 2
                     }}>
                       {String(idx + 1).padStart(2, '0')}
                     </span>
@@ -650,11 +779,114 @@ function App() {
                     multiple
                     accept="image/*"
                     style={{ display: 'none' }}
-                    onChange={(e) => handleUpload(Array.from(e.target.files))}
+                    onChange={(e) => {
+                      const sortedFiles = Array.from(e.target.files).sort((a, b) =>
+                        a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+                      );
+                      handleUpload(sortedFiles);
+                    }}
                   />
                 </div>
               )}
             </div>
+
+            {/* FOCUS MODAL (Single Image Edit) */}
+            {focusedIndex !== null && processed[focusedIndex] && (
+              <div className="modal-overlay animate-fade-in" style={{ zIndex: 100 }}>
+                <div className="modal" style={{ width: '90vw', height: '90vh', maxWidth: 'none', display: 'flex', flexDirection: 'column' }}>
+                  <div className="modal__header">
+                    <h2 className="modal__title">Edit: {processed[focusedIndex].name}</h2>
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      <button
+                        className={`btn btn--sm ${showOriginalInFocus ? 'btn-primary' : 'btn-secondary'}`}
+                        onMouseDown={() => setShowOriginalInFocus(true)}
+                        onMouseUp={() => setShowOriginalInFocus(false)}
+                        onMouseLeave={() => setShowOriginalInFocus(false)}
+                      >
+                        {showOriginalInFocus ? 'Showing Original' : 'Hold for Original'}
+                      </button>
+                      <div style={{ width: 1, height: 20, background: '#333', margin: '0 10px' }}></div>
+                      <button className="btn btn-ghost" onClick={() => setFocusedIndex((prev) => (prev > 0 ? prev - 1 : prev))}>← Prev</button>
+                      <button className="btn btn-ghost" onClick={() => setFocusedIndex((prev) => (prev < processed.length - 1 ? prev + 1 : prev))}>Next →</button>
+                      <button className="modal__close" onClick={() => setFocusedIndex(null)}>×</button>
+                    </div>
+                  </div>
+                  <div
+                    className="modal__content"
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#111', borderRadius: '8px', overflow: 'hidden', position: 'relative', cursor: showOriginalInFocus ? 'default' : 'move' }}
+                    onMouseDown={(e) => {
+                      if (showOriginalInFocus) return;
+                      const startX = e.clientX;
+                      const startY = e.clientY;
+                      const currentOffset = offsets[focusedIndex] || { x: 0, y: 0 };
+                      const imgElement = e.currentTarget.querySelector('img');
+                      const rect = imgElement.getBoundingClientRect();
+
+                      const onMove = (moveEvent) => {
+                        const dx = moveEvent.clientX - startX;
+                        const dy = moveEvent.clientY - startY;
+                        // Visual feedback
+                        imgElement.style.transform = `translate(${dx}px, ${dy}px)`;
+                      };
+
+                      const onUp = (upEvent) => {
+                        const dx = upEvent.clientX - startX;
+                        const dy = upEvent.clientY - startY;
+                        // Calculate percentage offset
+                        // Since render uses percentage of canvas size...
+                        // We need to divide delta by displayed image dimensions?
+                        // Actually, imageOps uses `offset.x * width`, so we normalize by rect width.
+                        const newOffset = {
+                          x: currentOffset.x - (dx / rect.width), // Inverted logic because standard drag moves content
+                          y: currentOffset.y - (dy / rect.height)
+                        };
+
+                        setOffsets({ ...offsets, [focusedIndex]: newOffset });
+                        imgElement.style.transform = 'none';
+
+                        document.removeEventListener('mousemove', onMove);
+                        document.removeEventListener('mouseup', onUp);
+                      };
+
+                      document.addEventListener('mousemove', onMove);
+                      document.addEventListener('mouseup', onUp);
+                    }}
+                  >
+                    {showOriginalInFocus ? (
+                      // Need original blob. Since we don't have it generated, we use the File object
+                      <img
+                        src={URL.createObjectURL(processed[focusedIndex].originalFile)} // Quick generation
+                        alt="Original"
+                        style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }}
+                      />
+                    ) : (
+                      <img
+                        src={processed[focusedIndex].preview}
+                        alt="Focused"
+                        style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', pointerEvents: 'none' }}
+                      />
+                    )}
+
+                    {!showOriginalInFocus && (
+                      <div style={{
+                        position: 'absolute',
+                        bottom: 20,
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        background: 'rgba(0,0,0,0.8)',
+                        padding: '10px 20px',
+                        borderRadius: '20px',
+                        color: 'white',
+                        fontSize: '0.8rem',
+                        pointerEvents: 'none'
+                      }}>
+                        Drag to adjust crop • Hold button to compare
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>

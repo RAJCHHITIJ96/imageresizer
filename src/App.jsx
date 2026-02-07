@@ -46,6 +46,7 @@ function App() {
   const [showCropGuides, setShowCropGuides] = useState(false); // Rule of thirds
   const [filterPreset, setFilterPreset] = useState('none');    // none, vivid, muted, bw
   const [devicePreview, setDevicePreview] = useState('none');  // none, instagram
+  const [histogramData, setHistogramData] = useState(null);    // brightness histogram
 
   // Lock body scroll when Export Studio is open
   useEffect(() => {
@@ -276,6 +277,39 @@ function App() {
       default: return 'none';
     }
   };
+
+  // Generate histogram from preview image
+  useEffect(() => {
+    if (!compressedPreview?.url) {
+      setHistogramData(null);
+      return;
+    }
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const size = 100; // Sample size
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, size, size);
+
+      const imageData = ctx.getImageData(0, 0, size, size);
+      const data = imageData.data;
+      const bins = new Array(32).fill(0); // 32 bins for histogram
+
+      for (let i = 0; i < data.length; i += 4) {
+        const brightness = Math.floor((data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 8);
+        bins[Math.min(31, brightness)]++;
+      }
+
+      const maxBin = Math.max(...bins);
+      const normalized = bins.map(b => (b / maxBin) * 100);
+      setHistogramData(normalized);
+    };
+    img.src = compressedPreview.url;
+  }, [compressedPreview?.url]);
 
   // ========================
   // LANDING PAGE - CINEMATIC HERO
@@ -563,20 +597,27 @@ function App() {
             {/* View Options */}
             <div className="control-group">
               <span className="control-label">View Options</span>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                 <button
                   onClick={() => setShowCropGuides(!showCropGuides)}
                   className={`studio-toggle-btn ${showCropGuides ? 'active' : ''}`}
                   title="Rule of Thirds Grid (G)"
                 >
-                  ▦ Grid
+                  ▦
                 </button>
                 <button
                   onClick={() => setShowOriginalAB(!showOriginalAB)}
                   className={`studio-toggle-btn ${showOriginalAB ? 'active' : ''}`}
                   title="A/B Comparison (Space)"
                 >
-                  {showOriginalAB ? '◀ Original' : '▶ Result'}
+                  {showOriginalAB ? '◀' : '▶'}
+                </button>
+                <button
+                  onClick={() => setDevicePreview(devicePreview === 'none' ? 'instagram' : 'none')}
+                  className={`studio-toggle-btn ${devicePreview !== 'none' ? 'active' : ''}`}
+                  title="Instagram Frame Preview"
+                >
+                  📱
                 </button>
               </div>
             </div>
@@ -786,6 +827,93 @@ function App() {
                 {zoomLevel !== 100 && (
                   <div style={{ position: 'absolute', bottom: 12, right: 12, background: 'rgba(0,0,0,0.7)', padding: '4px 10px', borderRadius: 4, fontSize: '0.6rem', color: '#60a5fa', fontFamily: 'var(--font-mono)', zIndex: 25 }}>
                     {zoomLevel}%
+                  </div>
+                )}
+
+                {/* Histogram */}
+                {histogramData && (
+                  <div style={{
+                    position: 'absolute',
+                    top: 40,
+                    right: 12,
+                    width: '80px',
+                    height: '40px',
+                    background: 'rgba(0,0,0,0.6)',
+                    borderRadius: 4,
+                    padding: '4px',
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    gap: '1px',
+                    zIndex: 25
+                  }}>
+                    {histogramData.map((value, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          flex: 1,
+                          height: `${value}%`,
+                          background: i < 10 ? '#3b82f6' : i < 22 ? '#22c55e' : '#ef4444',
+                          minHeight: '1px',
+                          borderRadius: '1px 1px 0 0'
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* Device Preview - Instagram Frame */}
+                {devicePreview === 'instagram' && (
+                  <div style={{
+                    position: 'absolute',
+                    inset: 0,
+                    pointerEvents: 'none',
+                    zIndex: 30,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    {/* Phone Frame */}
+                    <div style={{
+                      position: 'absolute',
+                      inset: '-15%',
+                      border: '3px solid rgba(255,255,255,0.15)',
+                      borderRadius: '24px',
+                      background: 'transparent'
+                    }}>
+                      {/* Status Bar */}
+                      <div style={{
+                        position: 'absolute',
+                        top: -30,
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        fontSize: '0.6rem',
+                        color: '#888',
+                        fontFamily: 'var(--font-mono)'
+                      }}>
+                        <span>●●●</span>
+                        <span>Instagram</span>
+                        <span>●●●</span>
+                      </div>
+                      {/* Bottom Bar */}
+                      <div style={{
+                        position: 'absolute',
+                        bottom: -25,
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        display: 'flex',
+                        gap: '16px',
+                        fontSize: '0.7rem',
+                        color: '#666'
+                      }}>
+                        <span>♡</span>
+                        <span>💬</span>
+                        <span>↗</span>
+                        <span style={{ marginLeft: 'auto' }}>⊡</span>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

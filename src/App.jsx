@@ -649,6 +649,37 @@ function App() {
                 </span>
               </div>
 
+              {/* Histogram in Sidebar */}
+              {histogramData && (
+                <div style={{ marginTop: '1rem', marginBottom: '0.5rem' }}>
+                  <span style={{ fontSize: '0.6rem', color: '#444', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: '0.5rem' }}>Brightness</span>
+                  <div style={{
+                    width: '100%',
+                    height: '32px',
+                    background: '#111',
+                    borderRadius: 4,
+                    padding: '4px',
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    gap: '1px'
+                  }}>
+                    {histogramData.map((value, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          flex: 1,
+                          height: `${value}%`,
+                          background: i < 10 ? '#3b82f6' : i < 22 ? '#22c55e' : '#ef4444',
+                          minHeight: '1px',
+                          borderRadius: '1px 1px 0 0',
+                          opacity: 0.8
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
                 <button
                   onClick={handleSingleExport}
@@ -830,91 +861,54 @@ function App() {
                   </div>
                 )}
 
-                {/* Histogram */}
-                {histogramData && (
-                  <div style={{
-                    position: 'absolute',
-                    top: 40,
-                    right: 12,
-                    width: '80px',
-                    height: '40px',
-                    background: 'rgba(0,0,0,0.6)',
-                    borderRadius: 4,
-                    padding: '4px',
-                    display: 'flex',
-                    alignItems: 'flex-end',
-                    gap: '1px',
-                    zIndex: 25
-                  }}>
-                    {histogramData.map((value, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          flex: 1,
-                          height: `${value}%`,
-                          background: i < 10 ? '#3b82f6' : i < 22 ? '#22c55e' : '#ef4444',
-                          minHeight: '1px',
-                          borderRadius: '1px 1px 0 0'
-                        }}
-                      />
-                    ))}
-                  </div>
-                )}
-
                 {/* Device Preview - Instagram Frame */}
                 {devicePreview === 'instagram' && (
-                  <div style={{
-                    position: 'absolute',
-                    inset: 0,
-                    pointerEvents: 'none',
-                    zIndex: 30,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}>
-                    {/* Phone Frame */}
+                  <>
+                    {/* Top Bar - Username */}
                     <div style={{
                       position: 'absolute',
-                      inset: '-15%',
-                      border: '3px solid rgba(255,255,255,0.15)',
-                      borderRadius: '24px',
-                      background: 'transparent'
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: '44px',
+                      background: 'linear-gradient(180deg, rgba(0,0,0,0.8) 0%, transparent 100%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '0 12px',
+                      gap: '10px',
+                      zIndex: 30
                     }}>
-                      {/* Status Bar */}
-                      <div style={{
-                        position: 'absolute',
-                        top: -30,
-                        left: '50%',
-                        transform: 'translateX(-50%)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        fontSize: '0.6rem',
-                        color: '#888',
-                        fontFamily: 'var(--font-mono)'
-                      }}>
-                        <span>●●●</span>
-                        <span>Instagram</span>
-                        <span>●●●</span>
+                      <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888)', padding: '2px' }}>
+                        <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#111' }} />
                       </div>
-                      {/* Bottom Bar */}
-                      <div style={{
-                        position: 'absolute',
-                        bottom: -25,
-                        left: '50%',
-                        transform: 'translateX(-50%)',
-                        display: 'flex',
-                        gap: '16px',
-                        fontSize: '0.7rem',
-                        color: '#666'
-                      }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#fff', fontFamily: 'var(--font-sans)' }}>your_username</span>
+                      <span style={{ marginLeft: 'auto', color: '#888', fontSize: '1rem' }}>⋯</span>
+                    </div>
+
+                    {/* Bottom Bar - Actions */}
+                    <div style={{
+                      position: 'absolute',
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      background: 'linear-gradient(0deg, rgba(0,0,0,0.9) 0%, transparent 100%)',
+                      padding: '40px 12px 12px',
+                      zIndex: 30
+                    }}>
+                      <div style={{ display: 'flex', gap: '16px', marginBottom: '8px', fontSize: '1.2rem' }}>
                         <span>♡</span>
                         <span>💬</span>
                         <span>↗</span>
                         <span style={{ marginLeft: 'auto' }}>⊡</span>
                       </div>
+                      <div style={{ fontSize: '0.7rem', color: '#888', fontFamily: 'var(--font-mono)' }}>
+                        <span style={{ color: '#fff', fontWeight: 600 }}>1,234 likes</span>
+                      </div>
+                      <div style={{ fontSize: '0.65rem', color: '#666', marginTop: '4px' }}>
+                        View all 56 comments
+                      </div>
                     </div>
-                  </div>
+                  </>
                 )}
               </div>
             </div>

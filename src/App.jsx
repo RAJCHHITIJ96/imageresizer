@@ -40,6 +40,13 @@ function App() {
   // Focus Mode State
   const [showOriginalInFocus, setShowOriginalInFocus] = useState(false);
 
+  // Export Studio Advanced Features
+  const [zoomLevel, setZoomLevel] = useState(100);         // 50-200%
+  const [showOriginalAB, setShowOriginalAB] = useState(false); // A/B toggle
+  const [showCropGuides, setShowCropGuides] = useState(false); // Rule of thirds
+  const [filterPreset, setFilterPreset] = useState('none');    // none, vivid, muted, bw
+  const [devicePreview, setDevicePreview] = useState('none');  // none, instagram
+
   // Lock body scroll when Export Studio is open
   useEffect(() => {
     if (showExportPanel) {
@@ -51,6 +58,43 @@ function App() {
       document.body.style.overflow = '';
     };
   }, [showExportPanel]);
+
+  // Keyboard shortcuts for Export Studio
+  useEffect(() => {
+    if (!showExportPanel) return;
+
+    const handleKeyDown = (e) => {
+      switch (e.key) {
+        case 'Escape':
+          setShowExportPanel(false);
+          break;
+        case 'ArrowLeft':
+          setPreviewIndex(prev => Math.max(0, prev - 1));
+          break;
+        case 'ArrowRight':
+          setPreviewIndex(prev => Math.min(processed.length - 1, prev + 1));
+          break;
+        case ' ':
+          e.preventDefault();
+          setShowOriginalAB(prev => !prev);
+          break;
+        case '+':
+        case '=':
+          setZoomLevel(prev => Math.min(200, prev + 25));
+          break;
+        case '-':
+          setZoomLevel(prev => Math.max(50, prev - 25));
+          break;
+        case 'g':
+        case 'G':
+          setShowCropGuides(prev => !prev);
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showExportPanel, processed.length]);
 
   // Re-process when options or originals change
   useEffect(() => {
@@ -199,6 +243,38 @@ function App() {
       return saved > 0 ? saved.toFixed(0) : 0;
     }
     return 0;
+  };
+
+  // Generate filename preview
+  const getPreviewFilename = () => {
+    if (!processed[previewIndex]) return '';
+    const paddedIndex = String(previewIndex + 1).padStart(2, '0');
+    const originalName = processed[previewIndex].name.split('.')[0];
+    return `${paddedIndex}_${originalName}_${ratio.replace(':', '-')}_${exportResolution}.jpg`;
+  };
+
+  // Single image export
+  const handleSingleExport = async () => {
+    if (!processed[previewIndex]) return;
+    setIsExporting(true);
+    try {
+      const result = await exportWithSettings(processed[previewIndex], exportResolution, exportCompression, enhanceEnabled);
+      saveAs(result.blob, getPreviewFilename());
+    } catch (error) {
+      console.error('Single export failed:', error);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Get filter style for preview
+  const getFilterStyle = () => {
+    switch (filterPreset) {
+      case 'vivid': return 'saturate(1.3) contrast(1.1)';
+      case 'muted': return 'saturate(0.7) brightness(1.05)';
+      case 'bw': return 'grayscale(1) contrast(1.1)';
+      default: return 'none';
+    }
   };
 
   // ========================
@@ -436,7 +512,7 @@ function App() {
 
             {/* Enhancement Control */}
             <div className="control-group">
-              <span className="control-label">Image Processing</span>
+              <span className="control-label">Processing</span>
               <div className="segment-control">
                 <button
                   onClick={() => setEnhanceEnabled(false)}
@@ -448,18 +524,73 @@ function App() {
                   onClick={() => setEnhanceEnabled(true)}
                   className={`segment-btn ${enhanceEnabled ? 'active' : ''}`}
                 >
-                  Smart Enhance
+                  Enhance
                 </button>
               </div>
-              <p style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: '#666' }}>
-                {enhanceEnabled ? "Applying adaptive contrast & detail sharpening." : "Original quality preservation."}
-              </p>
             </div>
 
-            {/* Stats & Action */}
+            {/* Zoom Control */}
+            <div className="control-group">
+              <span className="control-label">Zoom {zoomLevel}%</span>
+              <input
+                type="range"
+                min="50"
+                max="200"
+                step="25"
+                value={zoomLevel}
+                onChange={(e) => setZoomLevel(Number(e.target.value))}
+                className="studio-slider"
+              />
+            </div>
+
+            {/* Filter Presets */}
+            <div className="control-group">
+              <span className="control-label">Preview Filter</span>
+              <div className="segment-control">
+                {[['none', '○'], ['vivid', '◐'], ['muted', '◑'], ['bw', '●']].map(([key, icon]) => (
+                  <button
+                    key={key}
+                    onClick={() => setFilterPreset(key)}
+                    className={`segment-btn ${filterPreset === key ? 'active' : ''}`}
+                    title={key.charAt(0).toUpperCase() + key.slice(1)}
+                  >
+                    {icon}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* View Options */}
+            <div className="control-group">
+              <span className="control-label">View Options</span>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  onClick={() => setShowCropGuides(!showCropGuides)}
+                  className={`studio-toggle-btn ${showCropGuides ? 'active' : ''}`}
+                  title="Rule of Thirds Grid (G)"
+                >
+                  ▦ Grid
+                </button>
+                <button
+                  onClick={() => setShowOriginalAB(!showOriginalAB)}
+                  className={`studio-toggle-btn ${showOriginalAB ? 'active' : ''}`}
+                  title="A/B Comparison (Space)"
+                >
+                  {showOriginalAB ? '◀ Original' : '▶ Result'}
+                </button>
+              </div>
+            </div>
+
+            {/* Stats & Actions */}
             <div className="studio-footer">
+              <div className="studio-stat-row" style={{ marginBottom: '0.75rem' }}>
+                <span style={{ fontSize: '0.7rem', color: '#444' }}>Filename</span>
+                <span className="studio-stat-val" style={{ fontSize: '0.65rem', color: '#888', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {getPreviewFilename() || '...'}
+                </span>
+              </div>
               <div className="studio-stat-row">
-                <span>Total Size (Est.)</span>
+                <span>Size</span>
                 <span className="studio-stat-val">
                   {previewLoading ? '...' : formatSize(estimatedTotalSize)}
                 </span>
@@ -467,23 +598,38 @@ function App() {
               <div className="studio-stat-row">
                 <span>Resolution</span>
                 <span className="studio-stat-val">
-                  {compressedPreview?.width} × {compressedPreview?.height}
+                  {compressedPreview?.width}×{compressedPreview?.height}
                 </span>
               </div>
               <div className="studio-stat-row">
-                <span>Quality Efficiency</span>
+                <span>Savings</span>
                 <span className="studio-stat-val" style={{ color: calculateSavings() > 20 ? '#4ade80' : '#fff' }}>
-                  {calculateSavings()}% Saved
+                  {calculateSavings()}%
                 </span>
               </div>
 
-              <button
-                onClick={handleAdvancedExport}
-                disabled={isExporting || previewLoading}
-                className="btn-export-studio"
-              >
-                {isExporting ? 'Render & Zipping...' : `Export ${processed.length} Images`}
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+                <button
+                  onClick={handleSingleExport}
+                  disabled={isExporting || previewLoading}
+                  className="btn-export-single"
+                  title="Export only the currently previewed image"
+                >
+                  💾 This
+                </button>
+                <button
+                  onClick={handleAdvancedExport}
+                  disabled={isExporting || previewLoading}
+                  className="btn-export-studio"
+                  style={{ flex: 1 }}
+                >
+                  {isExporting ? 'Exporting...' : `Export ${processed.length}`}
+                </button>
+              </div>
+
+              <p style={{ marginTop: '1rem', fontSize: '0.6rem', color: '#444', textAlign: 'center', fontFamily: 'var(--font-mono)' }}>
+                ESC close • ←→ nav • SPACE toggle • G grid
+              </p>
             </div>
           </div>
 
@@ -499,15 +645,18 @@ function App() {
                   height: '100%',
                   maxHeight: 'calc(100vh - 200px)',
                   aspectRatio: ASPECT_RATIOS[ratio].width / ASPECT_RATIOS[ratio].height,
-                  cursor: 'ew-resize',
+                  cursor: showOriginalAB ? 'default' : 'ew-resize',
                   userSelect: 'none',
-                  position: 'relative'
+                  position: 'relative',
+                  transform: `scale(${zoomLevel / 100})`,
+                  transformOrigin: 'center center',
+                  transition: 'transform 0.2s ease-out'
                 }}
-                onMouseDown={handleSliderMouseDown}
-                onMouseMove={handleSliderMouseMove}
-                onMouseUp={handleSliderMouseUp}
-                onMouseLeave={handleSliderMouseUp}
-                onTouchMove={handleSliderTouchMove}
+                onMouseDown={!showOriginalAB ? handleSliderMouseDown : undefined}
+                onMouseMove={!showOriginalAB ? handleSliderMouseMove : undefined}
+                onMouseUp={!showOriginalAB ? handleSliderMouseUp : undefined}
+                onMouseLeave={!showOriginalAB ? handleSliderMouseUp : undefined}
+                onTouchMove={!showOriginalAB ? handleSliderTouchMove : undefined}
               >
                 {previewLoading ? (
                   <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555', background: '#111', borderRadius: '8px' }}>
@@ -516,6 +665,23 @@ function App() {
                       <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>Rendering Preview...</div>
                     </div>
                   </div>
+                ) : showOriginalAB ? (
+                  /* A/B Toggle Mode - Show Original Only */
+                  originalPreview && (
+                    <img
+                      src={originalPreview.url}
+                      alt="Original"
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'contain',
+                        filter: getFilterStyle()
+                      }}
+                      draggable={false}
+                    />
+                  )
                 ) : (
                   <>
                     {/* After Image (Background - Enhanced/Compressed) */}
@@ -523,7 +689,14 @@ function App() {
                       <img
                         src={compressedPreview.url}
                         alt="After"
-                        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'contain',
+                          filter: getFilterStyle()
+                        }}
                         draggable={false}
                       />
                     )}
@@ -562,8 +735,8 @@ function App() {
                       top: '50%',
                       left: `${sliderPosition}%`,
                       transform: 'translate(-50%, -50%)',
-                      width: '36px',
-                      height: '36px',
+                      width: '32px',
+                      height: '32px',
                       borderRadius: '50%',
                       background: '#fff',
                       display: 'flex',
@@ -571,17 +744,49 @@ function App() {
                       justifyContent: 'center',
                       boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
                       color: '#000',
-                      fontSize: '11px',
+                      fontSize: '10px',
                       zIndex: 10,
                       cursor: 'ew-resize'
                     }}>
                       ◀▶
                     </div>
-
-                    {/* Labels */}
-                    <div style={{ position: 'absolute', top: 12, left: 12, background: 'rgba(0,0,0,0.7)', padding: '4px 10px', borderRadius: 4, fontSize: '0.65rem', color: '#999', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Original</div>
-                    <div style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(0,0,0,0.7)', padding: '4px 10px', borderRadius: 4, fontSize: '0.65rem', color: enhanceEnabled ? '#4ade80' : '#999', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{enhanceEnabled ? '✨ Enhanced' : 'Compressed'}</div>
                   </>
+                )}
+
+                {/* Crop Guides - Rule of Thirds */}
+                {showCropGuides && (
+                  <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 20 }}>
+                    {/* Vertical Lines */}
+                    <div style={{ position: 'absolute', left: '33.33%', top: 0, bottom: 0, width: '1px', background: 'rgba(255,255,255,0.3)' }} />
+                    <div style={{ position: 'absolute', left: '66.66%', top: 0, bottom: 0, width: '1px', background: 'rgba(255,255,255,0.3)' }} />
+                    {/* Horizontal Lines */}
+                    <div style={{ position: 'absolute', top: '33.33%', left: 0, right: 0, height: '1px', background: 'rgba(255,255,255,0.3)' }} />
+                    <div style={{ position: 'absolute', top: '66.66%', left: 0, right: 0, height: '1px', background: 'rgba(255,255,255,0.3)' }} />
+                  </div>
+                )}
+
+                {/* Labels */}
+                <div style={{ position: 'absolute', top: 12, left: 12, background: 'rgba(0,0,0,0.7)', padding: '4px 10px', borderRadius: 4, fontSize: '0.65rem', color: showOriginalAB ? '#f59e0b' : '#999', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.1em', zIndex: 25 }}>
+                  {showOriginalAB ? '◀ Original' : 'Original'}
+                </div>
+                {!showOriginalAB && (
+                  <div style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(0,0,0,0.7)', padding: '4px 10px', borderRadius: 4, fontSize: '0.65rem', color: enhanceEnabled ? '#4ade80' : '#999', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.1em', zIndex: 25 }}>
+                    {enhanceEnabled ? '✨ Enhanced' : 'Compressed'}
+                  </div>
+                )}
+
+                {/* Filter Badge */}
+                {filterPreset !== 'none' && (
+                  <div style={{ position: 'absolute', bottom: 12, left: 12, background: 'rgba(0,0,0,0.7)', padding: '4px 10px', borderRadius: 4, fontSize: '0.6rem', color: '#f59e0b', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', zIndex: 25 }}>
+                    Preview: {filterPreset}
+                  </div>
+                )}
+
+                {/* Zoom Badge */}
+                {zoomLevel !== 100 && (
+                  <div style={{ position: 'absolute', bottom: 12, right: 12, background: 'rgba(0,0,0,0.7)', padding: '4px 10px', borderRadius: 4, fontSize: '0.6rem', color: '#60a5fa', fontFamily: 'var(--font-mono)', zIndex: 25 }}>
+                    {zoomLevel}%
+                  </div>
                 )}
               </div>
             </div>
